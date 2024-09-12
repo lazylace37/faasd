@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
 	"github.com/containerd/containerd"
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/containers"
+	"github.com/containerd/containerd/contrib/nvidia"
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
 	gocni "github.com/containerd/go-cni"
@@ -156,18 +158,30 @@ func deploy(ctx context.Context, req types.FunctionDeployment, client *container
 		memory.Limit = &v
 	}
 
+	var opts []oci.SpecOpts
+	if gpuStr, ok := labels["gpu"]; ok {
+		gpu, err := strconv.Atoi(gpuStr)
+		if err == nil {
+			opts = append(opts, nvidia.WithGPUs(nvidia.WithDevices(gpu), nvidia.WithAllCapabilities))
+		}
+	}
+
+	opts = append(opts,
+		oci.WithImageConfig(image),
+		oci.WithHostname(name),
+		oci.WithCapabilities([]string{"CAP_NET_RAW"}),
+		oci.WithMounts(mounts),
+		oci.WithEnv(envs),
+		withMemory(memory),
+	)
+
 	container, err := client.NewContainer(
 		ctx,
 		name,
 		containerd.WithImage(image),
 		containerd.WithSnapshotter(snapshotter),
 		containerd.WithNewSnapshot(name+"-snapshot", image),
-		containerd.WithNewSpec(oci.WithImageConfig(image),
-			oci.WithHostname(name),
-			oci.WithCapabilities([]string{"CAP_NET_RAW"}),
-			oci.WithMounts(mounts),
-			oci.WithEnv(envs),
-			withMemory(memory)),
+		containerd.WithNewSpec(opts...),
 		containerd.WithContainerLabels(labels),
 	)
 
